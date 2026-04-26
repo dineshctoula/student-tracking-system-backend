@@ -36,6 +36,29 @@ export class StudentController {
   }
 
   // =========================
+  // REUSABLE FILTER BUILDER
+  // =========================
+  private buildFilters(name?: string, className?: string, section?: string) {
+    const filters: any[] = [];
+
+    if (name) {
+      filters.push({
+        name: { contains: name, mode: 'insensitive' },
+      });
+    }
+
+    if (className) {
+      filters.push({ class: className });
+    }
+
+    if (section) {
+      filters.push({ section });
+    }
+
+    return filters.length ? { AND: filters } : {};
+  }
+
+  // =========================
   // SEARCH STUDENT
   // =========================
   @Get('search')
@@ -45,15 +68,7 @@ export class StudentController {
     @Query('section') section?: string,
   ) {
     return this.prisma.student.findMany({
-      where: {
-        AND: [
-          name
-            ? { name: { contains: name, mode: 'insensitive' } }
-            : {},
-          className ? { class: className } : {},
-          section ? { section } : {},
-        ],
-      },
+      where: this.buildFilters(name, className, section),
     });
   }
 
@@ -79,18 +94,23 @@ export class StudentController {
   }
 
   // =========================
-  // EXPORT EXCEL (FIXED)
+  // EXPORT EXCEL (FILTERED OR FULL)
   // =========================
   @Get('export')
-  async export(@Res() res) {
-    const students = await this.prisma.student.findMany();
+  async export(
+    @Res() res,
+    @Query('name') name?: string,
+    @Query('class') className?: string,
+    @Query('section') section?: string,
+  ) {
+    const students = await this.prisma.student.findMany({
+      where: this.buildFilters(name, className, section),
+    });
 
     const workbook = new ExcelJS.Workbook();
     const sheet = workbook.addWorksheet('Students');
 
-    const now = new Date();
-
-    const formattedDate = now.toLocaleDateString('en-GB', {
+    const formattedDate = new Date().toLocaleDateString('en-GB', {
       weekday: 'long',
       year: 'numeric',
       month: 'long',
@@ -134,7 +154,7 @@ export class StudentController {
     sheet.getRow(1).height = 28;
 
     // =========================
-    // HEADER (FIXED ORDER)
+    // HEADERS
     // =========================
     const headers = [
       'S.N',
@@ -154,60 +174,28 @@ export class StudentController {
       'Others',
     ];
 
-    const headerRow = sheet.getRow(3);
-    headerRow.values = headers;
-    headerRow.height = 22;
-
-    headerRow.font = { bold: true };
-    headerRow.alignment = {
-      horizontal: 'center',
-      vertical: 'middle',
-      wrapText: true,
-    };
-
-    headerRow.eachCell((cell) => {
-      cell.fill = {
-        type: 'pattern',
-        pattern: 'solid',
-        fgColor: { argb: 'FF1F4E79' },
-      };
-
-      cell.font = { bold: true, color: { argb: 'FFFFFFFF' } };
-
-      cell.alignment = {
-        horizontal: 'center',
-        vertical: 'middle',
-        wrapText: true,
-      };
-
-      cell.border = {
-        top: { style: 'thin' },
-        left: { style: 'thin' },
-        bottom: { style: 'thin' },
-        right: { style: 'thin' },
-      };
-    });
+    sheet.addRow(headers);
 
     // =========================
-    // DATA ROWS (FIXED ORDER)
+    // DATA ROWS
     // =========================
     students.forEach((s, index) => {
       sheet.addRow([
         index + 1,
         s.name,
-        s.subject || "",
-        s.class || "",
-        s.section || "",
+        s.subject || '',
+        s.class || '',
+        s.section || '',
         s.abs ? 'Yes' : 'No',
         s.late ? 'Yes' : 'No',
-        s.materials || "",
-        s.classwork || "",
-        s.homework || "",
-        s.behavior || "",
-        s.participation || "",
-        s.remarks || "",
-        s.action || "",
-        s.others || "",
+        s.materials || '',
+        s.classwork || '',
+        s.homework || '',
+        s.behavior || '',
+        s.participation || '',
+        s.remarks || '',
+        s.action || '',
+        s.others || '',
       ]);
     });
 

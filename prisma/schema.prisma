@@ -16,6 +16,7 @@ model Student {
   id            Int      @id @default(autoincrement())
   name          String
   class         String
+  subject       String?
   section       String?
   abs           Boolean  @default(false)
   late          Boolean  @default(false)
@@ -26,6 +27,7 @@ model Student {
   participation String?
   remarks       String?
   action        String?
+  others        String?
   createdAt     DateTime @default(now())
 
   

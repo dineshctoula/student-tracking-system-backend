@@ -1,10 +1,6 @@
 export class UpdateStudentDto {
   name?: string;
   class?: string;
-  subject?: string;   // ✅ NEW
+  subject?: string;
   section?: string;
-
-  behavior?: string;
-  remarks?: string;
-  others?: string;    // ✅ NEW
 }

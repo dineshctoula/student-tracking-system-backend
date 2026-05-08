@@ -4,31 +4,49 @@ generator client {
 
 datasource db {
   provider = "postgresql"
+  
 }
 
 model Admin {
-  id       Int    @id @default(autoincrement())
-  email    String @unique
-  password String
+  id        Int      @id @default(autoincrement())
+  email     String   @unique
+  password  String
+  createdAt DateTime @default(now())
 }
 
 model Student {
-  id            Int      @id @default(autoincrement())
-  name          String
-  class         String
-  subject       String?
-  section       String?
-  abs           Boolean  @default(false)
-  late          Boolean  @default(false)
-  materials     String?
-  classwork     String?
-  homework      String?
-  behavior      String?
-  participation String?
-  remarks       String?
-  action        String?
-  others        String?
-  createdAt     DateTime @default(now())
+  id         Int             @id @default(autoincrement())
+  name       String
+  class      String
+  section    String?
+  subject    String?
 
-  
+  createdAt  DateTime        @default(now())
+
+  // relation
+  records    StudentRecord[]
+}
+
+model StudentRecord {
+  id             Int      @id @default(autoincrement())
+
+  // relation
+  studentId      Int
+  student        Student  @relation(fields: [studentId], references: [id], onDelete: Cascade)
+
+  abs            Boolean  @default(false)
+  late           Boolean  @default(false)
+
+  materials      String?
+  classwork      String?
+  homework       String?
+  behavior       String?
+  participation  String?
+  remarks        String?
+  action         String?
+  others         String?
+
+  recordDate     DateTime @default(now())
+
+  createdAt      DateTime @default(now())
 }

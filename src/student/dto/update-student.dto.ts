@@ -1,6 +1,3 @@
-export class UpdateStudentDto {
-  name?: string;
-  class?: string;
-  subject?: string;
-  section?: string;
-}
+import type { CreateStudentDto } from './create-student.dto';
+
+export type UpdateStudentDto = Partial<CreateStudentDto>;

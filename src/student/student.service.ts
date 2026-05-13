@@ -1,4 +1,8 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+import {
+  BadRequestException,
+  Injectable,
+  NotFoundException,
+} from '@nestjs/common';
 import type { Prisma } from '@prisma/client';
 import * as ExcelJS from 'exceljs';
 
@@ -31,8 +35,83 @@ export class StudentService {
     return filters.length ? { AND: filters } : {};
   }
 
+  private startOfDayFromQuery(value: string): Date {
+    const s = value.trim();
+    const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(s);
+    if (m) {
+      const y = Number(m[1]);
+      const mo = Number(m[2]) - 1;
+      const d = Number(m[3]);
+      const dt = new Date(y, mo, d, 0, 0, 0, 0);
+      if (
+        dt.getFullYear() !== y ||
+        dt.getMonth() !== mo ||
+        dt.getDate() !== d
+      ) {
+        throw new BadRequestException(`Invalid from/to date: ${s}`);
+      }
+      return dt;
+    }
+    const dt = new Date(s);
+    if (Number.isNaN(dt.getTime())) {
+      throw new BadRequestException(`Invalid from/to date: ${s}`);
+    }
+    dt.setHours(0, 0, 0, 0);
+    return dt;
+  }
+
+  private endOfDayFromQuery(value: string): Date {
+    const s = value.trim();
+    const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(s);
+    if (m) {
+      const y = Number(m[1]);
+      const mo = Number(m[2]) - 1;
+      const d = Number(m[3]);
+      const dt = new Date(y, mo, d, 23, 59, 59, 999);
+      if (
+        dt.getFullYear() !== y ||
+        dt.getMonth() !== mo ||
+        dt.getDate() !== d
+      ) {
+        throw new BadRequestException(`Invalid from/to date: ${s}`);
+      }
+      return dt;
+    }
+    const dt = new Date(s);
+    if (Number.isNaN(dt.getTime())) {
+      throw new BadRequestException(`Invalid from/to date: ${s}`);
+    }
+    dt.setHours(23, 59, 59, 999);
+    return dt;
+  }
+
+  private buildRecordDateFilter(
+    from?: string,
+    to?: string,
+  ): Prisma.DateTimeFilter | undefined {
+    const fromTrim = from?.trim();
+    const toTrim = to?.trim();
+    if (!fromTrim && !toTrim) {
+      return undefined;
+    }
+    const filter: Prisma.DateTimeFilter = {};
+    if (fromTrim) {
+      filter.gte = this.startOfDayFromQuery(fromTrim);
+    }
+    if (toTrim) {
+      filter.lte = this.endOfDayFromQuery(toTrim);
+    }
+    if (filter.gte && filter.lte && filter.gte > filter.lte) {
+      throw new BadRequestException(
+        'Query "from" must be on or before "to" (same calendar day is allowed).',
+      );
+    }
+    return filter;
+  }
+
   private async findManyStudentsWithRecords(
     where: Prisma.StudentWhereInput = {},
+    recordDate?: Prisma.DateTimeFilter,
   ) {
     const students = await this.prisma.student.findMany({
       where,
@@ -46,7 +125,10 @@ export class StudentService {
     const ids = students.map((s) => s.id);
 
     const records = await this.prisma.studentRecord.findMany({
-      where: { studentId: { in: ids } },
+      where: {
+        studentId: { in: ids },
+        ...(recordDate ? { recordDate } : {}),
+      },
       orderBy: [{ recordDate: 'desc' }, { id: 'desc' }],
     });
 
@@ -178,8 +260,9 @@ export class StudentService {
     });
   }
 
-  findAll() {
-    return this.findManyStudentsWithRecords();
+  findAll(from?: string, to?: string) {
+    const recordDate = this.buildRecordDateFilter(from, to);
+    return this.findManyStudentsWithRecords({}, recordDate);
   }
 
   search(name?: string, className?: string, section?: string) {
@@ -306,8 +389,16 @@ export class StudentService {
     });
   }
 
-  async exportSpreadsheet(userId: number): Promise<Buffer> {
-    const students = await this.findManyStudentsWithRecords({ id: userId });
+  async exportSpreadsheet(
+    userId: number,
+    from?: string,
+    to?: string,
+  ): Promise<Buffer> {
+    const recordDate = this.buildRecordDateFilter(from, to);
+    const students = await this.findManyStudentsWithRecords(
+      { id: userId },
+      recordDate,
+    );
 
     if (students.length === 0) {
       throw new NotFoundException(`Student with userId ${userId} not found`);

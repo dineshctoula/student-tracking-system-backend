@@ -5,7 +5,13 @@ import {
 } from '@nestjs/common';
 import type { Prisma } from '@prisma/client';
 import * as ExcelJS from 'exceljs';
-
+import {
+  formatBsDate,
+  formatBsDateForDisplay,
+  formatBsDateLong,
+  parseDateInputEndOfDay,
+  parseDateInputStartOfDay,
+} from '../common/nepali-date.util';
 import { PrismaService } from '../prisma/prisma.service';
 import type { CreateStudentDto } from './dto/create-student.dto';
 import type { CreateStudentRecordDto } from './dto/create-student-record.dto';
@@ -20,7 +26,7 @@ export class StudentService {
 
     if (name) {
       filters.push({
-        name: { contains: name, mode: 'insensitive' },
+        name: { contains: name },
       });
     }
 
@@ -36,53 +42,41 @@ export class StudentService {
   }
 
   private startOfDayFromQuery(value: string): Date {
-    const s = value.trim();
-    const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(s);
-    if (m) {
-      const y = Number(m[1]);
-      const mo = Number(m[2]) - 1;
-      const d = Number(m[3]);
-      const dt = new Date(y, mo, d, 0, 0, 0, 0);
-      if (
-        dt.getFullYear() !== y ||
-        dt.getMonth() !== mo ||
-        dt.getDate() !== d
-      ) {
-        throw new BadRequestException(`Invalid from/to date: ${s}`);
-      }
-      return dt;
+    try {
+      return parseDateInputStartOfDay(value);
+    } catch {
+      throw new BadRequestException(`Invalid from/to date: ${value.trim()}`);
     }
-    const dt = new Date(s);
-    if (Number.isNaN(dt.getTime())) {
-      throw new BadRequestException(`Invalid from/to date: ${s}`);
-    }
-    dt.setHours(0, 0, 0, 0);
-    return dt;
   }
 
   private endOfDayFromQuery(value: string): Date {
-    const s = value.trim();
-    const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(s);
-    if (m) {
-      const y = Number(m[1]);
-      const mo = Number(m[2]) - 1;
-      const d = Number(m[3]);
-      const dt = new Date(y, mo, d, 23, 59, 59, 999);
-      if (
-        dt.getFullYear() !== y ||
-        dt.getMonth() !== mo ||
-        dt.getDate() !== d
-      ) {
-        throw new BadRequestException(`Invalid from/to date: ${s}`);
-      }
-      return dt;
+    try {
+      return parseDateInputEndOfDay(value);
+    } catch {
+      throw new BadRequestException(`Invalid from/to date: ${value.trim()}`);
     }
-    const dt = new Date(s);
-    if (Number.isNaN(dt.getTime())) {
-      throw new BadRequestException(`Invalid from/to date: ${s}`);
-    }
-    dt.setHours(23, 59, 59, 999);
-    return dt;
+  }
+
+  private enrichRecord<
+    T extends { recordDate: Date; createdAt: Date },
+  >(record: T) {
+    return {
+      ...record,
+      recordDate: formatBsDateForDisplay(record.recordDate),
+      createdAt: formatBsDateForDisplay(record.createdAt),
+    };
+  }
+
+  private enrichStudent<
+    T extends { createdAt: Date; records?: { recordDate: Date; createdAt: Date }[] },
+  >(student: T) {
+    return {
+      ...student,
+      createdAt: formatBsDateForDisplay(student.createdAt),
+      ...(student.records
+        ? { records: student.records.map((r) => this.enrichRecord(r)) }
+        : {}),
+    };
   }
 
   private buildRecordDateFilter(
@@ -146,10 +140,21 @@ export class StudentService {
       }
     }
 
-    return students.map((s) => ({
-      ...s,
-      records: recordsByStudentId.get(s.id) ?? [],
-    }));
+    return students.map((s) =>
+      this.enrichStudent({
+        ...s,
+        records: recordsByStudentId.get(s.id) ?? [],
+      }),
+    );
+  }
+
+  private parseBodyDate(value: string | undefined): Date | undefined {
+    if (value === undefined || value === '') return undefined;
+    try {
+      return parseDateInputStartOfDay(value);
+    } catch {
+      throw new BadRequestException(`Invalid date: ${value}`);
+    }
   }
 
   private recordCreateData(
@@ -157,6 +162,7 @@ export class StudentService {
     data: CreateStudentRecordDto,
   ): Prisma.StudentRecordUncheckedCreateInput {
     const {
+      subject,
       absences,
       abs,
       late,
@@ -174,6 +180,7 @@ export class StudentService {
 
     return {
       studentId,
+      subject: subject ?? null,
       abs: absences ?? abs ?? false,
       late: late ?? false,
       materials: material ?? null,
@@ -182,7 +189,9 @@ export class StudentService {
       homework: homework ?? null,
       participation: participation ?? null,
       remarks: remarks ?? null,
-      ...(date ? { recordDate: new Date(date) } : {}),
+      ...(date !== undefined && date !== ''
+        ? { recordDate: this.parseBodyDate(date)! }
+        : {}),
     };
   }
 
@@ -211,12 +220,12 @@ export class StudentService {
           name,
           class: studentClass,
           section: section ?? null,
-          subject: subject ?? null,
         },
       });
 
       await tx.studentRecord.create({
         data: this.recordCreateData(student.id, {
+          subject,
           absences,
           abs,
           late,
@@ -231,12 +240,13 @@ export class StudentService {
         }),
       });
 
-      return tx.student.findUniqueOrThrow({
+      const created = await tx.student.findUniqueOrThrow({
         where: { id: student.id },
         include: {
           records: { orderBy: { recordDate: 'desc' } },
         },
       });
+      return this.enrichStudent(created);
     });
   }
 
@@ -252,12 +262,13 @@ export class StudentService {
       data: this.recordCreateData(studentId, data),
     });
 
-    return this.prisma.student.findUniqueOrThrow({
+    const updated = await this.prisma.student.findUniqueOrThrow({
       where: { id: studentId },
       include: {
         records: { orderBy: { recordDate: 'desc' } },
       },
     });
+    return this.enrichStudent(updated);
   }
 
   findAll(from?: string, to?: string) {
@@ -265,10 +276,11 @@ export class StudentService {
     return this.findManyStudentsWithRecords({}, recordDate);
   }
 
-  search(name?: string, className?: string, section?: string) {
-    return this.prisma.student.findMany({
+  async search(name?: string, className?: string, section?: string) {
+    const students = await this.prisma.student.findMany({
       where: this.buildFilters(name, className, section),
     });
+    return students.map((s) => this.enrichStudent(s));
   }
 
   update(studentId: number, data: UpdateStudentDto) {
@@ -293,10 +305,10 @@ export class StudentService {
     const hasStudentField =
       name !== undefined ||
       studentClass !== undefined ||
-      subject !== undefined ||
       section !== undefined;
 
     const hasRecordField =
+      subject !== undefined ||
       absences !== undefined ||
       abs !== undefined ||
       late !== undefined ||
@@ -316,7 +328,6 @@ export class StudentService {
           data: {
             ...(name !== undefined ? { name } : {}),
             ...(studentClass !== undefined ? { class: studentClass } : {}),
-            ...(subject !== undefined ? { subject } : {}),
             ...(section !== undefined ? { section } : {}),
           },
         });
@@ -330,6 +341,7 @@ export class StudentService {
 
         if (latest) {
           const recordUpdate: Prisma.StudentRecordUncheckedUpdateInput = {};
+          if (subject !== undefined) recordUpdate.subject = subject;
           if (absences !== undefined) recordUpdate.abs = absences;
           else if (abs !== undefined) recordUpdate.abs = abs;
           if (late !== undefined) recordUpdate.late = late;
@@ -343,7 +355,9 @@ export class StudentService {
             recordUpdate.participation = participation;
           }
           if (remarks !== undefined) recordUpdate.remarks = remarks;
-          if (date !== undefined) recordUpdate.recordDate = new Date(date);
+          if (date !== undefined) {
+            recordUpdate.recordDate = this.parseBodyDate(date)!;
+          }
 
           await tx.studentRecord.update({
             where: { id: latest.id },
@@ -353,6 +367,7 @@ export class StudentService {
           await tx.studentRecord.create({
             data: {
               studentId,
+              subject: subject ?? null,
               abs: absences ?? abs ?? false,
               late: late ?? false,
               materials: material ?? null,
@@ -361,23 +376,58 @@ export class StudentService {
               homework: homework ?? null,
               participation: participation ?? null,
               remarks: remarks ?? null,
-              ...(date ? { recordDate: new Date(date) } : {}),
+              ...(date !== undefined && date !== ''
+                ? { recordDate: this.parseBodyDate(date)! }
+                : {}),
             },
           });
         }
       }
 
-      return tx.student.findUniqueOrThrow({
+      const updated = await tx.student.findUniqueOrThrow({
         where: { id: studentId },
         include: {
           records: { orderBy: { recordDate: 'desc' } },
         },
       });
+      return this.enrichStudent(updated);
     });
   }
 
-  remove(studentId: number) {
-    return this.prisma.$transaction(async (tx) => {
+  private sanitizeExportFilenamePart(value: string): string {
+    return (
+      value
+        .trim()
+        .replace(/[/\\?%*:|"<>]/g, '')
+        .replace(/\s+/g, '_')
+        .replace(/_+/g, '_')
+        .slice(0, 80) || 'student'
+    );
+  }
+
+  private buildExportStem(
+    studentName: string,
+    from?: string,
+    to?: string,
+  ): string {
+    const namePart = this.sanitizeExportFilenamePart(studentName);
+    const fromPart = from?.trim().slice(0, 10) ?? '';
+    const toPart = to?.trim().slice(0, 10) ?? '';
+
+    if (fromPart && toPart) {
+      return `${namePart}_${fromPart}_to_${toPart}`;
+    }
+    if (fromPart) {
+      return `${namePart}_from_${fromPart}`;
+    }
+    if (toPart) {
+      return `${namePart}_to_${toPart}`;
+    }
+    return namePart;
+  }
+
+  async remove(studentId: number) {
+    const deleted = await this.prisma.$transaction(async (tx) => {
       const existing = await tx.student.findUnique({
         where: { id: studentId },
       });
@@ -387,13 +437,14 @@ export class StudentService {
       await tx.studentRecord.deleteMany({ where: { studentId } });
       return tx.student.delete({ where: { id: studentId } });
     });
+    return this.enrichStudent(deleted);
   }
 
   async exportSpreadsheet(
     userId: number,
     from?: string,
     to?: string,
-  ): Promise<Buffer> {
+  ): Promise<{ buffer: Buffer; stem: string }> {
     const recordDate = this.buildRecordDateFilter(from, to);
     const students = await this.findManyStudentsWithRecords(
       { id: userId },
@@ -421,12 +472,17 @@ export class StudentService {
     const workbook = new ExcelJS.Workbook();
     const sheet = workbook.addWorksheet('Students');
 
-    const formattedDate = new Date().toLocaleDateString('en-GB', {
-      weekday: 'long',
-      year: 'numeric',
-      month: 'long',
-      day: 'numeric',
-    });
+    const formattedDate = formatBsDateLong(new Date());
+    const fromPart = from?.trim().slice(0, 10) ?? '';
+    const toPart = to?.trim().slice(0, 10) ?? '';
+    let reportTitle = `Student Report - ${s.name} - ${formattedDate}`;
+    if (fromPart && toPart) {
+      reportTitle = `Student Report - ${s.name} (${fromPart} to ${toPart}) - ${formattedDate}`;
+    } else if (fromPart) {
+      reportTitle = `Student Report - ${s.name} (from ${fromPart}) - ${formattedDate}`;
+    } else if (toPart) {
+      reportTitle = `Student Report - ${s.name} (to ${toPart}) - ${formattedDate}`;
+    }
 
     sheet.pageSetup = {
       paperSize: 9,
@@ -469,7 +525,7 @@ export class StudentService {
     sheet.mergeCells(`A1:${lastColLetter}1`);
     const titleCell = sheet.getCell('A1');
 
-    titleCell.value = `Student Report - ${formattedDate}`;
+    titleCell.value = reportTitle;
     titleCell.font = { size: 16, bold: true };
     titleCell.alignment = {
       horizontal: 'center',
@@ -480,16 +536,6 @@ export class StudentService {
 
     sheet.addRow(headers);
 
-    const dateOnly = (d: Date | null | undefined) => {
-      if (d == null) return '';
-      const x = d instanceof Date ? d : new Date(d);
-      if (Number.isNaN(x.getTime())) return '';
-      const y = x.getFullYear();
-      const m = String(x.getMonth() + 1).padStart(2, '0');
-      const day = String(x.getDate()).padStart(2, '0');
-      return `${y}-${m}-${day}`;
-    };
-
     const yesNo = (value: boolean | null | undefined) =>
       value === true ? 'Yes' : 'No';
 
@@ -498,8 +544,8 @@ export class StudentService {
         index + 1,
         s.class || '',
         s.section || '',
-        s.subject || '',
-        dateOnly(r?.recordDate ?? null),
+        r?.subject || '',
+        formatBsDate(r?.recordDate ?? null),
         yesNo(r?.abs),
         yesNo(r?.late),
         r?.materials || '',
@@ -538,6 +584,8 @@ export class StudentService {
     sheet.pageSetup.printArea = `A1:${lastColLetter}${2 + dataRows.length}`;
 
     const buf = await workbook.xlsx.writeBuffer();
-    return Buffer.from(buf);
+    const xlsxBuffer = Buffer.from(buf);
+    const stem = this.buildExportStem(s.name, from, to);
+    return { buffer: xlsxBuffer, stem };
   }
 }

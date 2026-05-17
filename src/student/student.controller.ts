@@ -52,26 +52,21 @@ export class StudentController {
     @Query('from') from?: string,
     @Query('to') to?: string,
   ) {
-    const buffer = await this.studentService.exportSpreadsheet(id, from, to);
-
-    const fromPart = from?.trim().slice(0, 10) ?? '';
-    const toPart = to?.trim().slice(0, 10) ?? '';
-    let filename = `student-${id}-records.xlsx`;
-    if (fromPart && toPart) {
-      filename = `student-${id}-records-${fromPart}_to_${toPart}.xlsx`;
-    } else if (fromPart) {
-      filename = `student-${id}-records-from-${fromPart}.xlsx`;
-    } else if (toPart) {
-      filename = `student-${id}-records-to-${toPart}.xlsx`;
-    }
+    const { buffer, stem } = await this.studentService.exportSpreadsheet(
+      id,
+      from,
+      to,
+    );
 
     res.setHeader(
       'Content-Type',
       'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
     );
-
-    res.setHeader('Content-Disposition', `attachment; filename=${filename}`);
-
+    const filename = `${stem}.xlsx`;
+    res.setHeader(
+      'Content-Disposition',
+      `attachment; filename="${filename.replace(/"/g, '')}"; filename*=UTF-8''${encodeURIComponent(filename)}`,
+    );
     res.send(buffer);
   }
 

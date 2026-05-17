@@ -20,10 +20,8 @@ export class AuthController {
     private jwtService: JwtService,
   ) {}
 
-  // ---------------- REGISTER ----------------
   @Post('register')
   async register(@Body() body: RegisterDto) {
-    console.log("hello world ")
     const existing = await this.prisma.admin.findUnique({
       where: { email: body.email },
     });
@@ -47,7 +45,6 @@ export class AuthController {
     };
   }
 
-  // ---------------- LOGIN ----------------
   @Post('login')
   async login(@Body() body: LoginDto) {
     const admin = await this.prisma.admin.findUnique({

@@ -1,6 +1,23 @@
 import { Injectable, OnModuleInit, OnModuleDestroy } from '@nestjs/common';
-import { PrismaPg } from '@prisma/adapter-pg';
+import { PrismaMariaDb } from '@prisma/adapter-mariadb';
 import { PrismaClient } from '@prisma/client';
+import type { PoolConfig } from 'mariadb';
+
+function poolConfigFromDatabaseUrl(connectionString: string): PoolConfig {
+  const normalized = connectionString.replace(/^mysql:\/\//i, 'http://');
+  const url = new URL(normalized);
+
+  return {
+    host: url.hostname,
+    port: url.port ? Number(url.port) : 3306,
+    user: decodeURIComponent(url.username),
+    password: decodeURIComponent(url.password),
+    database: url.pathname.replace(/^\//, ''),
+    allowPublicKeyRetrieval: true,
+    connectTimeout: 30_000,
+    connectionLimit: 10,
+  };
+}
 
 @Injectable()
 export class PrismaService
@@ -12,7 +29,9 @@ export class PrismaService
     if (!connectionString) {
       throw new Error('DATABASE_URL is not set');
     }
-    super({ adapter: new PrismaPg(connectionString) });
+    super({
+      adapter: new PrismaMariaDb(poolConfigFromDatabaseUrl(connectionString)),
+    });
   }
 
   async onModuleInit() {

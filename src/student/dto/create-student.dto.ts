@@ -1,8 +1,8 @@
 export interface CreateStudentDto {
   name: string;
   class: string;
-  subject?: string;
   section?: string;
+  subject?: string;
 
   absences?: boolean;
   abs?: boolean;

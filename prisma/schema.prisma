@@ -3,7 +3,7 @@ generator client {
 }
 
 datasource db {
-  provider = "postgresql"
+  provider = "mysql"
   
 }
 
@@ -19,24 +19,20 @@ model Student {
   name       String
   class      String
   section    String?
-  subject    String?
 
   createdAt  DateTime        @default(now())
-
-  // relation
   records    StudentRecord[]
 }
 
 model StudentRecord {
   id             Int      @id @default(autoincrement())
-
-  // relation
   studentId      Int
   student        Student  @relation(fields: [studentId], references: [id], onDelete: Cascade)
 
   abs            Boolean  @default(false)
   late           Boolean  @default(false)
 
+  subject        String?
   materials      String?
   classwork      String?
   homework       String?

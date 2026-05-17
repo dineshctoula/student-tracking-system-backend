@@ -426,6 +426,247 @@ export class StudentService {
     return namePart;
   }
 
+  private buildAllExportStem(from?: string, to?: string): string {
+    const fromPart = from?.trim().slice(0, 10) ?? '';
+    const toPart = to?.trim().slice(0, 10) ?? '';
+
+    if (fromPart && toPart) {
+      return `all_students_${fromPart}_to_${toPart}`;
+    }
+    if (fromPart) {
+      return `all_students_from_${fromPart}`;
+    }
+    if (toPart) {
+      return `all_students_to_${toPart}`;
+    }
+    return 'all_students';
+  }
+
+  private buildExportReportTitle(
+    studentLabel: string,
+    from?: string,
+    to?: string,
+  ): string {
+    const formattedDate = formatBsDateLong(new Date());
+    const fromPart = from?.trim().slice(0, 10) ?? '';
+    const toPart = to?.trim().slice(0, 10) ?? '';
+
+    if (fromPart && toPart) {
+      return `Student Report - ${studentLabel} (${fromPart} to ${toPart}) - ${formattedDate}`;
+    }
+    if (fromPart) {
+      return `Student Report - ${studentLabel} (from ${fromPart}) - ${formattedDate}`;
+    }
+    if (toPart) {
+      return `Student Report - ${studentLabel} (to ${toPart}) - ${formattedDate}`;
+    }
+    return `Student Report - ${studentLabel} - ${formattedDate}`;
+  }
+
+  private collectExportDataRows<
+    T extends {
+      name: string;
+      class: string;
+      section: string | null;
+      records: {
+        recordDate: Date;
+        subject: string | null;
+        abs: boolean;
+        late: boolean;
+        materials: string | null;
+        classwork: string | null;
+        homework: string | null;
+        behavior: string | null;
+        participation: string | null;
+        remarks: string | null;
+      }[];
+    },
+  >(students: T[]): { student: T; record: T['records'][number] | null }[] {
+    const dataRows: { student: T; record: T['records'][number] | null }[] = [];
+    for (const student of students) {
+      if (student.records.length === 0) {
+        dataRows.push({ student, record: null });
+      } else {
+        for (const record of student.records) {
+          dataRows.push({ student, record });
+        }
+      }
+    }
+    return dataRows;
+  }
+
+  private async buildXlsxBuffer(
+    reportTitle: string,
+    dataRows: {
+      student: {
+        name: string;
+        class: string;
+        section: string | null;
+      };
+      record: {
+        recordDate: Date;
+        subject: string | null;
+        abs: boolean;
+        late: boolean;
+        materials: string | null;
+        classwork: string | null;
+        homework: string | null;
+        behavior: string | null;
+        participation: string | null;
+        remarks: string | null;
+      } | null;
+    }[],
+    options: { includeStudentName: boolean },
+  ): Promise<Buffer> {
+    const workbook = new ExcelJS.Workbook();
+    const sheet = workbook.addWorksheet('Students');
+
+    const headers = options.includeStudentName
+      ? [
+          'Name',
+          'S.N',
+          'Class',
+          'Section',
+          'Subject',
+          'Date',
+          'Abs',
+          'Late',
+          'Materials',
+          'Classwork',
+          'Homework',
+          'Behavior',
+          'Participation',
+          'Remarks',
+        ]
+      : [
+          'S.N',
+          'Class',
+          'Section',
+          'Subject',
+          'Date',
+          'Abs',
+          'Late',
+          'Materials',
+          'Classwork',
+          'Homework',
+          'Behavior',
+          'Participation',
+          'Remarks',
+        ];
+
+    const lastColLetter = String.fromCharCode(
+      'A'.charCodeAt(0) + headers.length - 1,
+    );
+
+    sheet.pageSetup = {
+      paperSize: 9,
+      orientation: 'landscape',
+      fitToPage: true,
+      fitToWidth: 1,
+      fitToHeight: 0,
+      horizontalCentered: true,
+      verticalCentered: false,
+      margins: {
+        left: 0.4,
+        right: 0.4,
+        top: 0.6,
+        bottom: 0.6,
+        header: 0.3,
+        footer: 0.3,
+      },
+    };
+
+    sheet.mergeCells(`A1:${lastColLetter}1`);
+    const titleCell = sheet.getCell('A1');
+    titleCell.value = reportTitle;
+    titleCell.font = { size: 16, bold: true };
+    titleCell.alignment = {
+      horizontal: 'center',
+      vertical: 'middle',
+    };
+    sheet.getRow(1).height = 28;
+    sheet.addRow(headers);
+
+    const yesNo = (value: boolean | null | undefined) =>
+      value === true ? 'Yes' : 'No';
+
+    dataRows.forEach(({ student, record }, index) => {
+      const row = options.includeStudentName
+        ? [
+            student.name,
+            index + 1,
+            student.class || '',
+            student.section || '',
+            record?.subject || '',
+            formatBsDate(record?.recordDate ?? null),
+            yesNo(record?.abs),
+            yesNo(record?.late),
+            record?.materials || '',
+            record?.classwork || '',
+            record?.homework || '',
+            record?.behavior || '',
+            record?.participation || '',
+            record?.remarks || '',
+          ]
+        : [
+            index + 1,
+            student.class || '',
+            student.section || '',
+            record?.subject || '',
+            formatBsDate(record?.recordDate ?? null),
+            yesNo(record?.abs),
+            yesNo(record?.late),
+            record?.materials || '',
+            record?.classwork || '',
+            record?.homework || '',
+            record?.behavior || '',
+            record?.participation || '',
+            record?.remarks || '',
+          ];
+      sheet.addRow(row);
+    });
+
+    sheet.columns = options.includeStudentName
+      ? [
+          { width: 18 },
+          { width: 6 },
+          { width: 10 },
+          { width: 8 },
+          { width: 14 },
+          { width: 12 },
+          { width: 6 },
+          { width: 6 },
+          { width: 16 },
+          { width: 16 },
+          { width: 14 },
+          { width: 14 },
+          { width: 16 },
+          { width: 22 },
+        ]
+      : [
+          { width: 6 },
+          { width: 10 },
+          { width: 8 },
+          { width: 14 },
+          { width: 12 },
+          { width: 6 },
+          { width: 6 },
+          { width: 16 },
+          { width: 16 },
+          { width: 14 },
+          { width: 14 },
+          { width: 16 },
+          { width: 22 },
+        ];
+
+    sheet.views = [{ state: 'frozen', ySplit: 3 }];
+    sheet.pageSetup.printTitlesRow = '3:3';
+    sheet.pageSetup.printArea = `A1:${lastColLetter}${2 + dataRows.length}`;
+
+    const buf = await workbook.xlsx.writeBuffer();
+    return Buffer.from(buf);
+  }
+
   async remove(studentId: number) {
     const deleted = await this.prisma.$transaction(async (tx) => {
       const existing = await tx.student.findUnique({
@@ -455,137 +696,33 @@ export class StudentService {
       throw new NotFoundException(`Student with userId ${userId} not found`);
     }
 
-    const s = students[0];
-
-    type Row = (typeof students)[number];
-    type Rec = Row['records'][number];
-
-    const dataRows: { student: Row; record: Rec | null }[] = [];
-    if (s.records.length === 0) {
-      dataRows.push({ student: s, record: null });
-    } else {
-      for (const r of s.records) {
-        dataRows.push({ student: s, record: r });
-      }
-    }
-
-    const workbook = new ExcelJS.Workbook();
-    const sheet = workbook.addWorksheet('Students');
-
-    const formattedDate = formatBsDateLong(new Date());
-    const fromPart = from?.trim().slice(0, 10) ?? '';
-    const toPart = to?.trim().slice(0, 10) ?? '';
-    let reportTitle = `Student Report - ${s.name} - ${formattedDate}`;
-    if (fromPart && toPart) {
-      reportTitle = `Student Report - ${s.name} (${fromPart} to ${toPart}) - ${formattedDate}`;
-    } else if (fromPart) {
-      reportTitle = `Student Report - ${s.name} (from ${fromPart}) - ${formattedDate}`;
-    } else if (toPart) {
-      reportTitle = `Student Report - ${s.name} (to ${toPart}) - ${formattedDate}`;
-    }
-
-    sheet.pageSetup = {
-      paperSize: 9,
-      orientation: 'landscape',
-      fitToPage: true,
-      fitToWidth: 1,
-      fitToHeight: 0,
-      horizontalCentered: true,
-      verticalCentered: false,
-      margins: {
-        left: 0.4,
-        right: 0.4,
-        top: 0.6,
-        bottom: 0.6,
-        header: 0.3,
-        footer: 0.3,
-      },
-    };
-
-    const headers = [
-      'S.N',
-      'Class',
-      'Section',
-      'Subject',
-      'Date',
-      'Abs',
-      'Late',
-      'Materials',
-      'Classwork',
-      'Homework',
-      'Behavior',
-      'Participation',
-      'Remarks',
-    ];
-
-    const lastColLetter = String.fromCharCode(
-      'A'.charCodeAt(0) + headers.length - 1,
-    );
-
-    sheet.mergeCells(`A1:${lastColLetter}1`);
-    const titleCell = sheet.getCell('A1');
-
-    titleCell.value = reportTitle;
-    titleCell.font = { size: 16, bold: true };
-    titleCell.alignment = {
-      horizontal: 'center',
-      vertical: 'middle',
-    };
-
-    sheet.getRow(1).height = 28;
-
-    sheet.addRow(headers);
-
-    const yesNo = (value: boolean | null | undefined) =>
-      value === true ? 'Yes' : 'No';
-
-    dataRows.forEach(({ student: s, record: r }, index) => {
-      sheet.addRow([
-        index + 1,
-        s.class || '',
-        s.section || '',
-        r?.subject || '',
-        formatBsDate(r?.recordDate ?? null),
-        yesNo(r?.abs),
-        yesNo(r?.late),
-        r?.materials || '',
-        r?.classwork || '',
-        r?.homework || '',
-        r?.behavior || '',
-        r?.participation || '',
-        r?.remarks || '',
-      ]);
+    const student = students[0];
+    const dataRows = this.collectExportDataRows(students);
+    const reportTitle = this.buildExportReportTitle(student.name, from, to);
+    const buffer = await this.buildXlsxBuffer(reportTitle, dataRows, {
+      includeStudentName: false,
     });
+    const stem = this.buildExportStem(student.name, from, to);
+    return { buffer, stem };
+  }
 
-    sheet.columns = [
-      { width: 6 },
-      { width: 10 },
-      { width: 8 },
-      { width: 14 },
-      { width: 12 },
-      { width: 6 },
-      { width: 6 },
-      { width: 16 },
-      { width: 16 },
-      { width: 14 },
-      { width: 14 },
-      { width: 16 },
-      { width: 22 },
-    ];
+  async exportAllSpreadsheets(
+    from?: string,
+    to?: string,
+  ): Promise<{ buffer: Buffer; stem: string }> {
+    const recordDate = this.buildRecordDateFilter(from, to);
+    const students = await this.findManyStudentsWithRecords({}, recordDate);
 
-    sheet.views = [
-      {
-        state: 'frozen',
-        ySplit: 3,
-      },
-    ];
+    if (students.length === 0) {
+      throw new NotFoundException('No students found');
+    }
 
-    sheet.pageSetup.printTitlesRow = '3:3';
-    sheet.pageSetup.printArea = `A1:${lastColLetter}${2 + dataRows.length}`;
-
-    const buf = await workbook.xlsx.writeBuffer();
-    const xlsxBuffer = Buffer.from(buf);
-    const stem = this.buildExportStem(s.name, from, to);
-    return { buffer: xlsxBuffer, stem };
+    const dataRows = this.collectExportDataRows(students);
+    const reportTitle = this.buildExportReportTitle('All Students', from, to);
+    const buffer = await this.buildXlsxBuffer(reportTitle, dataRows, {
+      includeStudentName: true,
+    });
+    const stem = this.buildAllExportStem(from, to);
+    return { buffer, stem };
   }
 }

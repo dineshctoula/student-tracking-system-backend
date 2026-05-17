@@ -45,6 +45,19 @@ export class StudentController {
     return this.studentService.search(name, className, section);
   }
 
+  @Get('export')
+  async exportAll(
+    @Res() res: Response,
+    @Query('from') from?: string,
+    @Query('to') to?: string,
+  ) {
+    const { buffer, stem } = await this.studentService.exportAllSpreadsheets(
+      from,
+      to,
+    );
+    this.sendXlsxAttachment(res, buffer, stem);
+  }
+
   @Get(':id/export')
   async export(
     @Res() res: Response,
@@ -57,12 +70,15 @@ export class StudentController {
       from,
       to,
     );
+    this.sendXlsxAttachment(res, buffer, stem);
+  }
 
+  private sendXlsxAttachment(res: Response, buffer: Buffer, stem: string) {
+    const filename = `${stem}.xlsx`;
     res.setHeader(
       'Content-Type',
       'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
     );
-    const filename = `${stem}.xlsx`;
     res.setHeader(
       'Content-Disposition',
       `attachment; filename="${filename.replace(/"/g, '')}"; filename*=UTF-8''${encodeURIComponent(filename)}`,
